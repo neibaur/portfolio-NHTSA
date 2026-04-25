@@ -1,270 +1,141 @@
-# 🚗 NHTSA Vehicle Safety Data Pipeline
+# portfolio-nhtsa
 
-A production-style data engineering project that ingests, processes, and models **vehicle safety data** from the National Highway Traffic Safety Administration (NHTSA) using a modern **ELT pipeline** and **Medallion Architecture**.
+A production-style Python data engineering project for ingesting public vehicle safety data from the National Highway Traffic Safety Administration (NHTSA), storing raw API payloads in Supabase Postgres, and transforming them into analytics-ready datasets.
 
----
+## Project Overview
 
-## 📌 Project Overview
+This repository is a portfolio project focused on clear, testable data pipeline design. The pipeline will extract NHTSA public API data, preserve raw responses in a Bronze layer, standardize and validate records in a Silver layer, and publish curated Gold tables for dashboards and analysis.
 
-This project demonstrates end-to-end data engineering skills by building a scalable pipeline that:
+The current scaffold intentionally keeps business logic small. It establishes the package structure, configuration, quality gates, and example client tests that future ingestion and transformation work can build on.
 
-* Extracts data from **NHTSA public APIs**
-* Stores raw data in a PostgreSQL database (Supabase)
-* Transforms data through **Bronze → Silver → Gold layers**
-* Produces analytics-ready datasets for dashboards and reporting
-* Automates workflows using **GitHub Actions**
-
-The goal is to simulate a **real-world production data pipeline** while remaining **low-cost or free to operate**.
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```text
-NHTSA API
-   ↓
-Python Ingestion Layer (GitHub Actions)
-   ↓
-Supabase (Postgres)
-
-Bronze Layer (Raw JSON)
-   ↓
-Silver Layer (Cleaned & Structured)
-   ↓
-Gold Layer (Star Schema / Analytics)
-
-   ↓
-Power BI Dashboard / Portfolio Site
+NHTSA Public APIs
+        |
+        v
+Python ingestion jobs
+        |
+        v
+Supabase Postgres
+        |
+        v
+Bronze: raw JSON API responses
+        |
+        v
+Silver: validated, cleaned, deduplicated records
+        |
+        v
+Gold: analytics tables for dashboards
 ```
 
----
+## Medallion Layers
 
-## 🧱 Medallion Architecture
+**Bronze**
 
-### 🥉 Bronze Layer (Raw Data)
+- Stores raw API response payloads and request metadata.
+- Preserves source data for auditability and reprocessing.
+- Keeps transformations minimal.
 
-* Stores raw API responses (JSON)
-* Append-only ingestion
-* Minimal transformation
-* Source of truth for auditing and reprocessing
+**Silver**
 
-### 🥈 Silver Layer (Cleaned Data)
+- Applies Pydantic validation and normalization.
+- Produces typed, deduplicated, analysis-friendly entities.
+- Adds data quality checks as contracts become stable.
 
-* Normalized and validated data
-* Schema enforcement using `pydantic`
-* Deduplication and data quality checks
+**Gold**
 
-### 🥇 Gold Layer (Analytics-Ready)
+- Publishes dimensional or aggregate models.
+- Supports dashboard metrics, portfolio reporting, and downstream analytics.
+- Optimizes for query patterns rather than raw source fidelity.
 
-* Dimensional modeling (star schema)
-* Fact and dimension tables
-* Optimized for reporting and dashboards
+## Tech Stack
 
----
+- Python 3.11+
+- `httpx` for API calls
+- `pydantic` for response validation
+- `psycopg` for Postgres access
+- `python-dotenv` for local environment configuration
+- `pytest` and `pytest-cov` for tests and coverage
+- `ruff` for linting
+- `mypy` for static type checking
+- GitHub Actions for CI
 
-## 🧰 Tech Stack
+## Planned Pipeline Flow
 
-**Languages & Libraries**
+1. Load configuration from environment variables or `.env`.
+2. Call selected NHTSA public API endpoints with a typed API client.
+3. Validate standard API response envelopes with Pydantic.
+4. Insert raw JSON payloads into Bronze Postgres tables.
+5. Transform Bronze records into Silver normalized entities.
+6. Build Gold fact and dimension tables for analytics and dashboards.
+7. Run tests, linting, type checks, and coverage in CI before merging changes.
 
-* Python 3.11+
-* `httpx` (API requests)
-* `pydantic` (data validation)
-* `psycopg` / SQLAlchemy (Postgres access)
-
-**Data & Storage**
-
-* Supabase (PostgreSQL)
-
-**DevOps & Automation**
-
-* GitHub Actions (scheduled workflows)
-* CI/CD pipelines for ingestion & transformation
-
-**Testing & Quality**
-
-* `pytest` (unit & integration tests)
-* `pytest-cov` (coverage)
-* `ruff` (linting)
-* `mypy` (type checking)
-
-**Visualization (Planned)**
-
-* Power BI (dashboard integration)
-
----
-
-## 📡 Data Sources
-
-Primary data is sourced from:
-
-* NHTSA Recalls API
-* NHTSA Complaints API
-* NHTSA Vehicle Safety datasets
-
-These datasets include:
-
-* Vehicle recalls
-* Consumer complaints
-* Manufacturer communications
-* Safety investigations
-
----
-
-## 📂 Project Structure
+## Repository Structure
 
 ```text
 portfolio-nhtsa/
-│
-├── src/
-│   └── nhtsa_pipeline/
-│       ├── clients/        # API clients
-│       ├── ingestion/      # Bronze ingestion logic
-│       ├── transforms/     # Silver & Gold transformations
-│       ├── db/             # Database connections
-│       ├── models/         # Pydantic schemas
-│       └── config/         # Configuration
-│
-├── tests/
-│   ├── unit/
-│   └── integration/
-│
-├── sql/
-│   ├── bronze/
-│   ├── silver/
-│   └── gold/
-│
-├── .github/workflows/
-│   └── ci.yml
-│
-├── README.md
-└── pyproject.toml
+  src/
+    nhtsa_pipeline/
+      clients/        # NHTSA API client wrappers
+      config/         # Settings and environment loading
+      db/             # Postgres connection helpers
+      ingestion/      # Bronze ingestion entry points
+      models/         # Pydantic schemas
+      transforms/     # Silver and Gold transformation helpers
+  tests/
+    unit/
+    integration/
+  sql/
+    bronze/
+    silver/
+    gold/
+  .github/workflows/
+    ci.yml
 ```
 
----
+## Getting Started
 
-## 🔄 Pipeline Workflow
-
-### 1. Ingestion
-
-* Scheduled GitHub Actions job
-* Pulls data from NHTSA APIs
-* Writes raw JSON to Bronze tables
-
-### 2. Transformation
-
-* Bronze → Silver: cleaning, normalization, validation
-* Silver → Gold: dimensional modeling
-
-### 3. Data Quality
-
-* Schema validation with `pydantic`
-* Test coverage on transformations
-* CI pipeline enforces quality checks
-
----
-
-## 🧪 Testing Strategy
-
-This project follows a **test-driven development (TDD)** approach:
-
-* Unit tests for API clients and transformations
-* Mocked API responses for deterministic testing
-* Integration tests for database interactions
-* Code coverage tracking via CI pipeline
-
-Example scenarios tested:
-
-* API success and failure responses
-* Rate limiting (HTTP 429)
-* Invalid data handling
-* Schema validation errors
-
----
-
-## ⚙️ CI/CD Automation
-
-GitHub Actions pipelines:
-
-* ✅ Run tests and coverage checks
-* ✅ Enforce linting and type safety
-* 🔄 Scheduled data ingestion jobs
-* 🔄 Automated transformations
-
----
-
-## 📊 Planned Data Model (Gold Layer)
-
-Example star schema:
-
-```text
-dim_vehicle
-dim_manufacturer
-dim_date
-
-fact_recall
-fact_complaint
-```
-
----
-
-## 🚀 Getting Started
-
-### 1. Clone the repo
+Create and activate a Python 3.11+ virtual environment, then install the project with development dependencies:
 
 ```bash
-git clone https://github.com/<your-username>/portfolio-nhtsa.git
-cd portfolio-nhtsa
+python -m venv .venv
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-### 2. Set up environment
+Create local environment settings:
 
 ```bash
 cp .env.example .env
 ```
 
-### 3. Install dependencies
+Run quality checks:
 
 ```bash
-pip install -e .
-```
-
-### 4. Run tests
-
-```bash
+ruff check .
+mypy
 pytest
 ```
 
----
+## Configuration
 
-## 🌱 Future Enhancements
+The application reads these environment variables:
 
-* Incremental data loading strategies
-* Data versioning and lineage tracking
-* Dashboard embedding in portfolio site
-* API layer for serving processed data
-* Cost monitoring and optimization
-* Real-time ingestion capabilities
+- `ENVIRONMENT`
+- `LOG_LEVEL`
+- `NHTSA_API_BASE_URL`
+- `NHTSA_API_TIMEOUT_SECONDS`
+- `DATABASE_URL`
 
----
+See `.env.example` for local defaults.
 
-## 💡 Why This Project Matters
+## Testing
 
-This project showcases:
+The initial test suite includes mocked HTTP tests for the NHTSA API client and a small transformation helper test. External API calls should remain mocked in unit tests so the suite is deterministic and fast.
 
-* End-to-end data pipeline design
-* Real-world data modeling (Medallion + Star Schema)
-* CI/CD and automation
-* Test-driven development practices
-* Cloud-native architecture (low-cost)
+Coverage settings are defined in `pyproject.toml` and enforced with a minimum threshold.
 
----
-
-## 📜 License
+## License
 
 This project is licensed under the MIT License.
-
----
-
-## 👤 Author
-
-Built as part of a technical portfolio to demonstrate modern data engineering and analytics capabilities.
