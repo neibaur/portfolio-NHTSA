@@ -118,6 +118,24 @@ mypy
 pytest
 ```
 
+## Milestone 1: Local API Client
+
+The first local milestone fetches NHTSA recalls data and saves the raw JSON response for inspection. It does not connect to Supabase or any database.
+
+Run a sample recalls fetch from the repository root:
+
+```bash
+python scripts/fetch_recalls_sample.py --year 2023 --make Toyota --model Camry
+```
+
+The script writes the raw API response to:
+
+```text
+data/raw/nhtsa_recalls_2023_Toyota_Camry.json
+```
+
+Files under `data/raw/` are ignored by git so downloaded API samples stay local.
+
 ## Configuration
 
 The application reads these environment variables:

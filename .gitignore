@@ -205,6 +205,11 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+.pytest-tmp/
+
+# Local raw API samples
+data/raw/*
+!data/raw/.gitkeep
 
 # PyPI configuration file
 .pypirc

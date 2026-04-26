@@ -1,5 +1,7 @@
 """Tests for the NHTSA API client."""
 
+import shutil
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -9,16 +11,19 @@ from pydantic import ValidationError
 from nhtsa_pipeline.clients.nhtsa import (
     NhtsaApiError,
     NhtsaClient,
+    NhtsaInvalidJsonError,
     NhtsaRateLimitError,
     NhtsaServerError,
+    NhtsaTimeoutError,
 )
 from nhtsa_pipeline.config.settings import Settings
+from nhtsa_pipeline.io.json_files import raw_recalls_path, write_raw_recalls_json
 
 
 class MockResponseSequence:
     """MockTransport handler that returns prebuilt responses in order."""
 
-    def __init__(self, *responses: httpx.Response) -> None:
+    def __init__(self, *responses: httpx.Response | Exception) -> None:
         self._responses = list(responses)
         self.requests: list[httpx.Request] = []
 
@@ -26,7 +31,10 @@ class MockResponseSequence:
         self.requests.append(request)
         if not self._responses:
             raise AssertionError("No mocked response available for request")
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def recall_payload(**overrides: Any) -> dict[str, Any]:
@@ -88,6 +96,21 @@ def test_get_recalls_by_vehicle_validates_response() -> None:
     assert response.results[0].campaign_number == "23V123000"
     assert response.results[0].make == "Honda"
     assert response.results[0].park_outside is True
+
+
+def test_fetch_recalls_raw_returns_unmodified_payload() -> None:
+    payload = {
+        "Count": 1,
+        "Message": "Results returned successfully",
+        "Results": [recall_payload()],
+        "SearchCriteria": "modelYear:2019 make:Honda model:Civic",
+    }
+    handler = MockResponseSequence(httpx.Response(200, json=payload))
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        response = client.fetch_recalls_raw(year=2019, make="Honda", model="Civic")
+
+    assert response == payload
 
 
 def test_get_validates_generic_response_envelope() -> None:
@@ -164,6 +187,25 @@ def test_get_recalls_by_vehicle_uses_exponential_backoff_for_429_without_retry_a
     assert response.count == 0
 
 
+def test_get_recalls_by_vehicle_handles_successful_empty_results() -> None:
+    handler = MockResponseSequence(
+        httpx.Response(
+            200,
+            json={
+                "Count": 0,
+                "Message": "Results returned successfully",
+                "Results": [],
+            },
+        )
+    )
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        response = client.get_recalls_by_vehicle(make="Honda", model="Civic", model_year=2019)
+
+    assert response.count == 0
+    assert response.results == []
+
+
 def test_get_raises_rate_limit_error_after_retries() -> None:
     handler = MockResponseSequence(
         httpx.Response(429),
@@ -195,6 +237,31 @@ def test_get_raises_server_error_for_500_responses() -> None:
     assert len(handler.requests) == 1
 
 
+def test_get_raises_invalid_json_error() -> None:
+    handler = MockResponseSequence(httpx.Response(200, content=b"not-json"))
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        with pytest.raises(NhtsaInvalidJsonError, match="invalid JSON"):
+            client.get_recalls_by_vehicle(make="Honda", model="Civic", model_year=2019)
+
+
+def test_get_raises_invalid_json_error_for_non_object_payload() -> None:
+    handler = MockResponseSequence(httpx.Response(200, json=[]))
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        with pytest.raises(NhtsaInvalidJsonError, match="non-object"):
+            client.get_recalls_by_vehicle(make="Honda", model="Civic", model_year=2019)
+
+
+def test_get_raises_timeout_error() -> None:
+    request = httpx.Request("GET", "https://api.nhtsa.gov/recalls/recallsByVehicle")
+    handler = MockResponseSequence(httpx.TimeoutException("request timed out", request=request))
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        with pytest.raises(NhtsaTimeoutError, match="timed out"):
+            client.get_recalls_by_vehicle(make="Honda", model="Civic", model_year=2019)
+
+
 def test_get_raises_domain_error_for_non_retryable_http_errors() -> None:
     handler = MockResponseSequence(httpx.Response(404))
 
@@ -218,3 +285,42 @@ def test_get_recalls_by_vehicle_raises_validation_error_for_invalid_records() ->
     with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
         with pytest.raises(ValidationError):
             client.get_recalls_by_vehicle(make="Honda", model="Civic", model_year=2019)
+
+
+def test_write_raw_recalls_json_writes_expected_file() -> None:
+    output_dir = Path("data/raw/test-writer")
+    shutil.rmtree(output_dir, ignore_errors=True)
+    payload = {
+        "Count": 1,
+        "Message": "Results returned successfully",
+        "Results": [recall_payload()],
+    }
+
+    try:
+        output_path = write_raw_recalls_json(
+            payload,
+            output_dir=output_dir,
+            year=2023,
+            make="Toyota",
+            model="Camry",
+        )
+
+        assert output_path == output_dir / "nhtsa_recalls_2023_Toyota_Camry.json"
+        file_text = output_path.read_text(encoding="utf-8")
+        assert file_text.endswith("\n")
+        assert '"NHTSACampaignNumber": "23V123000"' in file_text
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
+def test_raw_recalls_path_sanitizes_filename_parts() -> None:
+    output_dir = Path("data/raw/test-writer")
+
+    output_path = raw_recalls_path(
+        output_dir=output_dir,
+        year=2023,
+        make="Mercedes-Benz",
+        model="E Class / Wagon",
+    )
+
+    assert output_path == output_dir / "nhtsa_recalls_2023_Mercedes-Benz_E_Class_Wagon.json"

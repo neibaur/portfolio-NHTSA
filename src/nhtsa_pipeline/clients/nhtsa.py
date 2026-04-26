@@ -1,17 +1,26 @@
 """HTTP client for NHTSA public APIs."""
 
+import logging
 import time
 from collections.abc import Callable, Mapping
+from json import JSONDecodeError
 from typing import Any, cast
 
 import httpx
+from pydantic import ValidationError
 
 from nhtsa_pipeline.config.settings import Settings
 from nhtsa_pipeline.models.nhtsa import NhtsaApiResponse, NhtsaRecallsResponse
 
+logger = logging.getLogger(__name__)
+
 
 class NhtsaApiError(RuntimeError):
     """Raised when the NHTSA API returns an unsuccessful response."""
+
+
+class NhtsaInvalidJsonError(NhtsaApiError):
+    """Raised when the NHTSA API response body is not valid JSON."""
 
 
 class NhtsaRateLimitError(NhtsaApiError):
@@ -20,6 +29,10 @@ class NhtsaRateLimitError(NhtsaApiError):
 
 class NhtsaServerError(NhtsaApiError):
     """Raised when the NHTSA API returns a server-side error."""
+
+
+class NhtsaTimeoutError(NhtsaApiError):
+    """Raised when the NHTSA API request times out."""
 
 
 class NhtsaClient:
@@ -52,11 +65,32 @@ class NhtsaClient:
         model_year: int,
     ) -> NhtsaRecallsResponse:
         """Fetch recall records for a specific make, model, and model year."""
+        payload = self.fetch_recalls_raw(year=model_year, make=make, model=model)
+        return NhtsaRecallsResponse.model_validate(payload)
+
+    def fetch_recalls_raw(
+        self,
+        *,
+        year: int,
+        make: str,
+        model: str,
+    ) -> dict[str, Any]:
+        """Fetch recalls by vehicle and return the raw decoded JSON payload."""
         payload = self.get_json(
             "/recalls/recallsByVehicle",
-            params={"make": make, "model": model, "modelYear": model_year},
+            params={"make": make, "model": model, "modelYear": year},
         )
-        return NhtsaRecallsResponse.model_validate(payload)
+
+        try:
+            envelope = NhtsaApiResponse.model_validate(payload)
+        except ValidationError as exc:
+            message = "NHTSA recalls response did not match the expected response envelope"
+            raise NhtsaApiError(message) from exc
+
+        if envelope.count == 0 or not envelope.results:
+            logger.warning("NHTSA recalls response returned no results")
+
+        return payload
 
     def get(
         self,
@@ -76,7 +110,17 @@ class NhtsaClient:
     ) -> dict[str, Any]:
         """Fetch a NHTSA endpoint and return the decoded JSON body."""
         response = self._get_with_retries(path, params=params)
-        return cast(dict[str, Any], response.json())
+        try:
+            payload = response.json()
+        except (JSONDecodeError, ValueError) as exc:
+            message = "NHTSA API returned invalid JSON"
+            raise NhtsaInvalidJsonError(message) from exc
+
+        if not isinstance(payload, dict):
+            message = "NHTSA API returned a non-object JSON payload"
+            raise NhtsaInvalidJsonError(message)
+
+        return cast(dict[str, Any], payload)
 
     def _get_with_retries(
         self,
@@ -85,9 +129,16 @@ class NhtsaClient:
         params: Mapping[str, str | int] | None = None,
     ) -> httpx.Response:
         for attempt in range(self._max_retries + 1):
-            response = self._client.get(path, params=params)
+            try:
+                response = self._client.get(path, params=params)
+            except httpx.TimeoutException as exc:
+                message = "NHTSA API request timed out"
+                raise NhtsaTimeoutError(message) from exc
+
+            logger.info("NHTSA API request completed with status %s", response.status_code)
             if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
                 if attempt < self._max_retries:
+                    logger.warning("NHTSA API rate limited request; retrying")
                     self._sleep(self._retry_delay(response, attempt))
                     continue
                 message = "NHTSA API rate limit exceeded after retries with status 429"
