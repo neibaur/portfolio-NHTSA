@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class NhtsaApiResponse(BaseModel):
@@ -10,9 +10,12 @@ class NhtsaApiResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    count: int = Field(alias="Count", ge=0)
-    message: str = Field(alias="Message", default="")
-    results: list[dict[str, Any]] = Field(alias="Results", default_factory=list)
+    count: int = Field(validation_alias=AliasChoices("Count", "count"), ge=0)
+    message: str = Field(validation_alias=AliasChoices("Message", "message"), default="")
+    results: list[dict[str, Any]] = Field(
+        validation_alias=AliasChoices("Results", "results"),
+        default_factory=list,
+    )
 
 
 class NhtsaRecall(BaseModel):
@@ -41,6 +44,9 @@ class NhtsaRecallsResponse(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    count: int = Field(alias="Count", ge=0)
-    message: str = Field(alias="Message", default="")
-    results: list[NhtsaRecall] = Field(alias="Results", default_factory=list)
+    count: int = Field(validation_alias=AliasChoices("Count", "count"), ge=0)
+    message: str = Field(validation_alias=AliasChoices("Message", "message"), default="")
+    results: list[NhtsaRecall] = Field(
+        validation_alias=AliasChoices("Results", "results"),
+        default_factory=list,
+    )

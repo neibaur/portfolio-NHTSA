@@ -12,7 +12,11 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from nhtsa_pipeline.clients.nhtsa import NhtsaApiError, NhtsaClient  # noqa: E402
+from nhtsa_pipeline.clients.nhtsa import (  # noqa: E402
+    RECALLS_BY_VEHICLE_PATH,
+    NhtsaApiError,
+    NhtsaClient,
+)
 from nhtsa_pipeline.io.json_files import write_raw_recalls_json  # noqa: E402
 
 
@@ -54,7 +58,12 @@ def main() -> int:
         make=args.make,
         model=args.model,
     )
+    results = payload.get("Results", payload.get("results", []))
+    result_count = len(results) if isinstance(results, list) else 0
+
     print(f"Wrote raw NHTSA recalls JSON to {output_path}")
+    print(f"Endpoint: {RECALLS_BY_VEHICLE_PATH}")
+    print(f"Results found: {result_count}")
     return 0
 
 

@@ -13,6 +13,7 @@ from nhtsa_pipeline.config.settings import Settings
 from nhtsa_pipeline.models.nhtsa import NhtsaApiResponse, NhtsaRecallsResponse
 
 logger = logging.getLogger(__name__)
+RECALLS_BY_VEHICLE_PATH = "/recalls/recallsByVehicle"
 
 
 class NhtsaApiError(RuntimeError):
@@ -77,7 +78,7 @@ class NhtsaClient:
     ) -> dict[str, Any]:
         """Fetch recalls by vehicle and return the raw decoded JSON payload."""
         payload = self.get_json(
-            "/recalls/recallsByVehicle",
+            RECALLS_BY_VEHICLE_PATH,
             params={"make": make, "model": model, "modelYear": year},
         )
 
@@ -87,7 +88,12 @@ class NhtsaClient:
             message = "NHTSA recalls response did not match the expected response envelope"
             raise NhtsaApiError(message) from exc
 
-        if envelope.count == 0 or not envelope.results:
+        if envelope.count > 0 and not envelope.results:
+            logger.warning(
+                "NHTSA recalls response reported Count=%s but the result list was empty",
+                envelope.count,
+            )
+        elif envelope.count == 0:
             logger.warning("NHTSA recalls response returned no results")
 
         return payload

@@ -113,6 +113,27 @@ def test_fetch_recalls_raw_returns_unmodified_payload() -> None:
     assert response == payload
 
 
+def test_get_recalls_by_vehicle_accepts_real_recalls_response_casing() -> None:
+    handler = MockResponseSequence(
+        httpx.Response(
+            200,
+            json={
+                "Count": 1,
+                "Message": "Results returned successfully",
+                "results": [recall_payload(ModelYear="2023", Make="TOYOTA", Model="CAMRY")],
+            },
+        )
+    )
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        response = client.get_recalls_by_vehicle(make="Toyota", model="Camry", model_year=2023)
+
+    assert response.count == 1
+    assert len(response.results) == 1
+    assert response.results[0].make == "TOYOTA"
+    assert response.results[0].model_year == 2023
+
+
 def test_get_validates_generic_response_envelope() -> None:
     handler = MockResponseSequence(
         httpx.Response(
@@ -204,6 +225,28 @@ def test_get_recalls_by_vehicle_handles_successful_empty_results() -> None:
 
     assert response.count == 0
     assert response.results == []
+
+
+def test_fetch_recalls_raw_warns_when_count_positive_but_results_empty(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    handler = MockResponseSequence(
+        httpx.Response(
+            200,
+            json={
+                "Count": 1,
+                "Message": "Results returned successfully",
+                "results": [],
+            },
+        )
+    )
+
+    with NhtsaClient(settings=settings(), client=mocked_client(handler)) as client:
+        with caplog.at_level("WARNING"):
+            payload = client.fetch_recalls_raw(year=2023, make="Toyota", model="Camry")
+
+    assert payload["Count"] == 1
+    assert "reported Count=1 but the result list was empty" in caplog.text
 
 
 def test_get_raises_rate_limit_error_after_retries() -> None:
