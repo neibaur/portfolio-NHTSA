@@ -1,6 +1,7 @@
 """Tests for the NHTSA API client."""
 
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,11 @@ from nhtsa_pipeline.clients.nhtsa import (
     NhtsaTimeoutError,
 )
 from nhtsa_pipeline.config.settings import Settings
-from nhtsa_pipeline.io.json_files import raw_recalls_path, write_raw_recalls_json
+from nhtsa_pipeline.io.json_files import (
+    build_bronze_payload,
+    raw_recalls_path,
+    write_raw_recalls_json,
+)
 
 
 class MockResponseSequence:
@@ -346,14 +351,77 @@ def test_write_raw_recalls_json_writes_expected_file() -> None:
             year=2023,
             make="Toyota",
             model="Camry",
+            endpoint="/recalls/recallsByVehicle",
+            query={"modelYear": 2023, "make": "Toyota", "model": "Camry"},
         )
 
         assert output_path == output_dir / "nhtsa_recalls_2023_Toyota_Camry.json"
         file_text = output_path.read_text(encoding="utf-8")
         assert file_text.endswith("\n")
+        assert '"metadata": {' in file_text
+        assert '"data": [' in file_text
         assert '"NHTSACampaignNumber": "23V123000"' in file_text
     finally:
         shutil.rmtree(output_dir, ignore_errors=True)
+
+
+def test_build_bronze_payload_adds_standard_metadata() -> None:
+    payload = {
+        "Count": 2,
+        "Message": "Results returned successfully",
+        "results": [recall_payload(), recall_payload(NHTSACampaignNumber="23V456000")],
+    }
+    query = {"modelYear": 2023, "make": "Toyota", "model": "Camry"}
+
+    bronze_payload = build_bronze_payload(
+        payload,
+        endpoint="/recalls/recallsByVehicle",
+        query=query,
+        ingestion_timestamp="2026-04-26T18:30:00+00:00",
+    )
+
+    assert bronze_payload == {
+        "metadata": {
+            "source": "NHTSA",
+            "endpoint": "/recalls/recallsByVehicle",
+            "query": query,
+            "ingestion_timestamp": "2026-04-26T18:30:00+00:00",
+            "record_count": 2,
+        },
+        "data": payload["results"],
+    }
+
+
+def test_build_bronze_payload_calculates_record_count_for_uppercase_results() -> None:
+    payload = {
+        "Count": 1,
+        "Message": "Results returned successfully",
+        "Results": [recall_payload()],
+    }
+
+    bronze_payload = build_bronze_payload(
+        payload,
+        endpoint="/recalls/recallsByVehicle",
+        query={"modelYear": 2019, "make": "Honda", "model": "Civic"},
+        ingestion_timestamp="2026-04-26T18:30:00+00:00",
+    )
+
+    assert bronze_payload["metadata"]["record_count"] == 1
+    assert bronze_payload["data"] == payload["Results"]
+
+
+def test_build_bronze_payload_uses_iso8601_timestamp() -> None:
+    bronze_payload = build_bronze_payload(
+        {"Count": 0, "Message": "Results returned successfully", "results": []},
+        endpoint="/recalls/recallsByVehicle",
+        query={"modelYear": 2023, "make": "Toyota", "model": "Camry"},
+    )
+
+    timestamp = bronze_payload["metadata"]["ingestion_timestamp"]
+    parsed_timestamp = datetime.fromisoformat(timestamp)
+
+    assert parsed_timestamp.tzinfo is not None
+    assert bronze_payload["metadata"]["record_count"] == 0
 
 
 def test_raw_recalls_path_sanitizes_filename_parts() -> None:

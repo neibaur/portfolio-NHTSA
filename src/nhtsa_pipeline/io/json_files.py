@@ -2,10 +2,12 @@
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
+SOURCE_NHTSA = "NHTSA"
 
 
 def sanitized_filename_part(value: str) -> str:
@@ -36,6 +38,40 @@ def write_json_file(payload: dict[str, Any], output_path: Path) -> Path:
     return output_path
 
 
+def extract_results(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract API result records while tolerating NHTSA response key casing."""
+    results = payload.get("Results", payload.get("results", []))
+    if not isinstance(results, list):
+        return []
+    return [record for record in results if isinstance(record, dict)]
+
+
+def utc_ingestion_timestamp() -> str:
+    """Return the current UTC timestamp in ISO8601 format."""
+    return datetime.now(UTC).isoformat()
+
+
+def build_bronze_payload(
+    api_payload: dict[str, Any],
+    *,
+    endpoint: str,
+    query: dict[str, str | int],
+    ingestion_timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Wrap raw API records in a standardized local Bronze payload."""
+    records = extract_results(api_payload)
+    return {
+        "metadata": {
+            "source": SOURCE_NHTSA,
+            "endpoint": endpoint,
+            "query": query,
+            "ingestion_timestamp": ingestion_timestamp or utc_ingestion_timestamp(),
+            "record_count": len(records),
+        },
+        "data": records,
+    }
+
+
 def write_raw_recalls_json(
     payload: dict[str, Any],
     *,
@@ -43,10 +79,12 @@ def write_raw_recalls_json(
     year: int,
     make: str,
     model: str,
+    endpoint: str,
+    query: dict[str, str | int],
 ) -> Path:
-    """Write raw NHTSA recalls JSON to the expected local filename."""
+    """Write NHTSA recalls records in the local Bronze JSON format."""
+    bronze_payload = build_bronze_payload(payload, endpoint=endpoint, query=query)
     return write_json_file(
-        payload,
+        bronze_payload,
         raw_recalls_path(output_dir=output_dir, year=year, make=make, model=model),
     )
-

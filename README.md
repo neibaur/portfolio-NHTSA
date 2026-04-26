@@ -136,6 +136,31 @@ data/raw/nhtsa_recalls_2023_Toyota_Camry.json
 
 Files under `data/raw/` are ignored by git so downloaded API samples stay local.
 
+## Milestone 2: Bronze Layer Simulation
+
+Local raw API files now use a Bronze-style envelope with `metadata` and `data` fields. The metadata captures the source system, endpoint, query parameters, UTC ingestion timestamp, and record count. The `data` field stores the raw records returned by the API with minimal transformation.
+
+This structure makes each local extract easier to audit and replay. It also mirrors the shape that can later be inserted into a database Bronze table, without adding Supabase or database logic yet.
+
+Example output shape:
+
+```json
+{
+  "metadata": {
+    "source": "NHTSA",
+    "endpoint": "/recalls/recallsByVehicle",
+    "query": {
+      "modelYear": 2023,
+      "make": "Toyota",
+      "model": "Camry"
+    },
+    "ingestion_timestamp": "2026-04-26T18:30:00+00:00",
+    "record_count": 2
+  },
+  "data": []
+}
+```
+
 ## Configuration
 
 The application reads these environment variables:

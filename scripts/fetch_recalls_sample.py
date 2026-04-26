@@ -17,7 +17,7 @@ from nhtsa_pipeline.clients.nhtsa import (  # noqa: E402
     NhtsaApiError,
     NhtsaClient,
 )
-from nhtsa_pipeline.io.json_files import write_raw_recalls_json  # noqa: E402
+from nhtsa_pipeline.io.json_files import extract_results, write_raw_recalls_json  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,6 +39,7 @@ def main() -> int:
     """Fetch recalls and write the raw JSON payload locally."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args()
+    query = {"modelYear": args.year, "make": args.make, "model": args.model}
 
     try:
         with NhtsaClient() as client:
@@ -57,13 +58,15 @@ def main() -> int:
         year=args.year,
         make=args.make,
         model=args.model,
+        endpoint=RECALLS_BY_VEHICLE_PATH,
+        query=query,
     )
-    results = payload.get("Results", payload.get("results", []))
-    result_count = len(results) if isinstance(results, list) else 0
+    record_count = len(extract_results(payload))
 
-    print(f"Wrote raw NHTSA recalls JSON to {output_path}")
+    print(f"Records written: {record_count}")
+    print(f"Output file: {output_path}")
     print(f"Endpoint: {RECALLS_BY_VEHICLE_PATH}")
-    print(f"Results found: {result_count}")
+    print(f"Query parameters: {query}")
     return 0
 
 
