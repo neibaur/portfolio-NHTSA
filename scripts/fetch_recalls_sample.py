@@ -17,7 +17,11 @@ from nhtsa_pipeline.clients.nhtsa import (  # noqa: E402
     NhtsaApiError,
     NhtsaClient,
 )
-from nhtsa_pipeline.io.json_files import extract_results, write_raw_recalls_json  # noqa: E402
+from nhtsa_pipeline.io.json_files import (  # noqa: E402
+    content_hash,
+    extract_results,
+    write_raw_recalls_json,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +35,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("data/raw"),
         help="Directory for the raw JSON output",
+    )
+    parser.add_argument(
+        "--timestamp-output",
+        action="store_true",
+        help="Write to a timestamped filename instead of overwriting the default sample file",
     )
     return parser.parse_args()
 
@@ -60,13 +69,14 @@ def main() -> int:
         model=args.model,
         endpoint=RECALLS_BY_VEHICLE_PATH,
         query=query,
+        timestamp_output=args.timestamp_output,
     )
-    record_count = len(extract_results(payload))
+    records = extract_results(payload)
 
-    print(f"Records written: {record_count}")
-    print(f"Output file: {output_path}")
-    print(f"Endpoint: {RECALLS_BY_VEHICLE_PATH}")
-    print(f"Query parameters: {query}")
+    print(f"Fetched {len(records)} recalls")
+    print(f"File written to: {output_path}")
+    print(f"Query: {args.make} {args.model} {args.year}")
+    print(f"Content hash: {content_hash(records)}")
     return 0
 
 

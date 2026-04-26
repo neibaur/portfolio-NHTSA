@@ -1,7 +1,8 @@
 """Tests for the NHTSA API client."""
 
+import json
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from nhtsa_pipeline.clients.nhtsa import (
 from nhtsa_pipeline.config.settings import Settings
 from nhtsa_pipeline.io.json_files import (
     build_bronze_payload,
+    content_hash,
+    filename_timestamp,
     raw_recalls_path,
     write_raw_recalls_json,
 )
@@ -359,6 +362,7 @@ def test_write_raw_recalls_json_writes_expected_file() -> None:
         file_text = output_path.read_text(encoding="utf-8")
         assert file_text.endswith("\n")
         assert '"metadata": {' in file_text
+        assert '"content_hash":' in file_text
         assert '"data": [' in file_text
         assert '"NHTSACampaignNumber": "23V123000"' in file_text
     finally:
@@ -372,6 +376,7 @@ def test_build_bronze_payload_adds_standard_metadata() -> None:
         "results": [recall_payload(), recall_payload(NHTSACampaignNumber="23V456000")],
     }
     query = {"modelYear": 2023, "make": "Toyota", "model": "Camry"}
+    records = payload["results"]
 
     bronze_payload = build_bronze_payload(
         payload,
@@ -387,8 +392,9 @@ def test_build_bronze_payload_adds_standard_metadata() -> None:
             "query": query,
             "ingestion_timestamp": "2026-04-26T18:30:00+00:00",
             "record_count": 2,
+            "content_hash": content_hash(records),
         },
-        "data": payload["results"],
+        "data": records,
     }
 
 
@@ -407,6 +413,7 @@ def test_build_bronze_payload_calculates_record_count_for_uppercase_results() ->
     )
 
     assert bronze_payload["metadata"]["record_count"] == 1
+    assert bronze_payload["metadata"]["content_hash"] == content_hash(payload["Results"])
     assert bronze_payload["data"] == payload["Results"]
 
 
@@ -422,6 +429,50 @@ def test_build_bronze_payload_uses_iso8601_timestamp() -> None:
 
     assert parsed_timestamp.tzinfo is not None
     assert bronze_payload["metadata"]["record_count"] == 0
+
+
+def test_content_hash_is_stable_for_equivalent_payloads() -> None:
+    first_payload = [{"Make": "Toyota", "Model": "Camry", "ModelYear": 2023}]
+    second_payload = [{"ModelYear": 2023, "Model": "Camry", "Make": "Toyota"}]
+
+    assert content_hash(first_payload) == content_hash(second_payload)
+    assert len(content_hash(first_payload)) == 64
+
+
+def test_filename_timestamp_uses_filename_safe_utc_format() -> None:
+    timestamp = filename_timestamp(datetime(2026, 4, 26, 18, 30, 5, tzinfo=UTC))
+
+    assert timestamp == "20260426_183005"
+
+
+def test_write_raw_recalls_json_can_write_timestamped_filename() -> None:
+    output_dir = Path("data/raw/test-writer")
+    shutil.rmtree(output_dir, ignore_errors=True)
+    payload = {
+        "Count": 1,
+        "Message": "Results returned successfully",
+        "results": [recall_payload()],
+    }
+
+    try:
+        output_path = write_raw_recalls_json(
+            payload,
+            output_dir=output_dir,
+            year=2023,
+            make="Toyota",
+            model="Camry",
+            endpoint="/recalls/recallsByVehicle",
+            query={"modelYear": 2023, "make": "Toyota", "model": "Camry"},
+            timestamp_output=True,
+            output_timestamp="20260426_183005",
+        )
+
+        assert output_path == output_dir / "nhtsa_recalls_2023_Toyota_Camry_20260426_183005.json"
+        bronze_payload = json.loads(output_path.read_text(encoding="utf-8"))
+        assert bronze_payload["metadata"]["record_count"] == 1
+        assert bronze_payload["metadata"]["content_hash"] == content_hash(payload["results"])
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 def test_raw_recalls_path_sanitizes_filename_parts() -> None:

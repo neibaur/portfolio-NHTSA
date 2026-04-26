@@ -155,11 +155,28 @@ Example output shape:
       "model": "Camry"
     },
     "ingestion_timestamp": "2026-04-26T18:30:00+00:00",
-    "record_count": 2
+    "record_count": 2,
+    "content_hash": "..."
   },
   "data": []
 }
 ```
+
+## Local Development Behavior
+
+Local recall fetches overwrite the default file for the same query:
+
+```text
+data/raw/nhtsa_recalls_<year>_<make>_<model>.json
+```
+
+Use `--timestamp-output` when you want to keep multiple debug snapshots:
+
+```bash
+python scripts/fetch_recalls_sample.py --year 2023 --make Toyota --model Camry --timestamp-output
+```
+
+That writes a filename with a `YYYYMMDD_HHMMSS` suffix. These local files are convenient inspection artifacts, not the system of record. A future database-backed Bronze layer can use fields such as `query_hash`, `content_hash`, and idempotent upserts to make ingestion repeatable without relying on local files.
 
 ## Configuration
 

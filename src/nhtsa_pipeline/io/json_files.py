@@ -3,6 +3,7 @@
 import json
 import re
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,15 @@ def raw_recalls_path(
     year: int,
     make: str,
     model: str,
+    timestamp_suffix: str | None = None,
 ) -> Path:
     """Build the local raw recalls JSON output path."""
     safe_make = sanitized_filename_part(make)
     safe_model = sanitized_filename_part(model)
-    return output_dir / f"nhtsa_recalls_{year}_{safe_make}_{safe_model}.json"
+    filename = f"nhtsa_recalls_{year}_{safe_make}_{safe_model}"
+    if timestamp_suffix is not None:
+        filename = f"{filename}_{timestamp_suffix}"
+    return output_dir / f"{filename}.json"
 
 
 def write_json_file(payload: dict[str, Any], output_path: Path) -> Path:
@@ -51,6 +56,20 @@ def utc_ingestion_timestamp() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def filename_timestamp(now: datetime | None = None) -> str:
+    """Return a UTC timestamp suitable for filenames."""
+    timestamp = now or datetime.now(UTC)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return timestamp.astimezone(UTC).strftime("%Y%m%d_%H%M%S")
+
+
+def content_hash(payload: object) -> str:
+    """Return a stable SHA256 hash for a JSON-serializable payload."""
+    canonical_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 def build_bronze_payload(
     api_payload: dict[str, Any],
     *,
@@ -67,6 +86,7 @@ def build_bronze_payload(
             "query": query,
             "ingestion_timestamp": ingestion_timestamp or utc_ingestion_timestamp(),
             "record_count": len(records),
+            "content_hash": content_hash(records),
         },
         "data": records,
     }
@@ -81,10 +101,21 @@ def write_raw_recalls_json(
     model: str,
     endpoint: str,
     query: dict[str, str | int],
+    timestamp_output: bool = False,
+    output_timestamp: str | None = None,
 ) -> Path:
     """Write NHTSA recalls records in the local Bronze JSON format."""
     bronze_payload = build_bronze_payload(payload, endpoint=endpoint, query=query)
+    timestamp_suffix = output_timestamp if timestamp_output else None
+    if timestamp_output and timestamp_suffix is None:
+        timestamp_suffix = filename_timestamp()
     return write_json_file(
         bronze_payload,
-        raw_recalls_path(output_dir=output_dir, year=year, make=make, model=model),
+        raw_recalls_path(
+            output_dir=output_dir,
+            year=year,
+            make=make,
+            model=model,
+            timestamp_suffix=timestamp_suffix,
+        ),
     )
